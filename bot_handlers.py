@@ -4,12 +4,13 @@ Telegram bot handlers for video downloading functionality.
 
 import os
 import logging
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.error import TelegramError
 from video_downloader import VideoDownloader
 from config import MESSAGES
 import re
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,17 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Start command sent to user {update.effective_user.id}")
     except Exception as e:
         logger.error(f"Error sending start message: {e}")
+
+def _is_youtube_url(url: str) -> bool:
+    """Check if URL is from YouTube."""
+    try:
+        parsed_url = urlparse(url.lower())
+        domain = parsed_url.netloc
+        if domain.startswith('www.'):
+            domain = domain[4:]
+        return domain in ['youtube.com', 'youtu.be', 'm.youtube.com']
+    except Exception:
+        return False
 
 async def handle_video_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle video links sent by users."""
@@ -48,10 +60,22 @@ async def handle_video_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(MESSAGES["error_unsupported"])
             return
         
-        # Send processing message
-        processing_message = await update.message.reply_text(MESSAGES["processing"])
+        # Special handling for YouTube URLs - show format options
+        if _is_youtube_url(user_message):
+            keyboard = [
+                [InlineKeyboardButton(MESSAGES["youtube_video_1080"], callback_data=f"yt_video_{user_id}")],
+                [InlineKeyboardButton(MESSAGES["youtube_audio_mp3"], callback_data=f"yt_audio_{user_id}")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            # Store the URL in context for later use
+            context.user_data[f'youtube_url_{user_id}'] = user_message
+            
+            await update.message.reply_text(MESSAGES["youtube_options"], reply_markup=reply_markup)
+            return
         
-        # Download the video
+        # For non-YouTube platforms, proceed with normal download
+        processing_message = await update.message.reply_text(MESSAGES["processing"])
         file_path, result = downloader.download_video(user_message)
         
         if file_path:
@@ -106,6 +130,94 @@ async def handle_video_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Unexpected error in handle_video_link: {e}")
         try:
             await update.message.reply_text(MESSAGES["error_download_failed"])
+        except:
+            pass
+
+async def handle_youtube_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle YouTube format selection callbacks."""
+    query = update.callback_query
+    await query.answer()
+    
+    try:
+        callback_data = query.data
+        user_id = update.effective_user.id
+        
+        # Get the stored YouTube URL
+        youtube_url = context.user_data.get(f'youtube_url_{user_id}')
+        if not youtube_url:
+            await query.edit_message_text("خەپە! ناتوانم URL بدۆزمەوە، تکایە دووبارە تاقی بکەوە")
+            return
+        
+        # Determine format based on callback
+        if callback_data.startswith('yt_video_'):
+            format_type = 'video'
+            processing_msg = MESSAGES["processing_video"]
+            completed_msg = MESSAGES["completed_video"]
+        elif callback_data.startswith('yt_audio_'):
+            format_type = 'audio'
+            processing_msg = MESSAGES["processing_audio"]
+            completed_msg = MESSAGES["completed_audio"]
+        else:
+            await query.edit_message_text(MESSAGES["error_download_failed"])
+            return
+        
+        # Update message to show processing
+        await query.edit_message_text(processing_msg)
+        
+        # Download with specified format
+        file_path, result = downloader.download_youtube(youtube_url, format_type)
+        
+        if file_path:
+            try:
+                # Send the file
+                if format_type == 'audio':
+                    with open(file_path, 'rb') as audio_file:
+                        await context.bot.send_audio(
+                            chat_id=query.message.chat_id,
+                            audio=audio_file,
+                            caption=completed_msg
+                        )
+                else:
+                    with open(file_path, 'rb') as video_file:
+                        await context.bot.send_video(
+                            chat_id=query.message.chat_id,
+                            video=video_file,
+                            caption=completed_msg,
+                            supports_streaming=True
+                        )
+                
+                logger.info(f"YouTube {format_type} sent successfully to user {user_id}")
+                
+            except TelegramError as e:
+                if "file is too big" in str(e).lower():
+                    await context.bot.send_message(query.message.chat_id, MESSAGES["error_file_too_large"])
+                else:
+                    await context.bot.send_message(query.message.chat_id, MESSAGES["error_download_failed"])
+                logger.error(f"Telegram error sending YouTube {format_type}: {e}")
+            
+            except Exception as e:
+                await context.bot.send_message(query.message.chat_id, MESSAGES["error_download_failed"])
+                logger.error(f"Error sending YouTube {format_type}: {e}")
+            
+            finally:
+                # Clean up the downloaded file
+                downloader.cleanup_file(file_path)
+                # Delete the options message
+                try:
+                    await query.delete_message()
+                except:
+                    pass
+        else:
+            await query.edit_message_text(MESSAGES["error_download_failed"])
+            logger.error(f"YouTube {format_type} download failed for user {user_id}: {result}")
+        
+        # Clean up stored URL
+        context.user_data.pop(f'youtube_url_{user_id}', None)
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in handle_youtube_callback: {e}")
+        try:
+            await query.edit_message_text(MESSAGES["error_download_failed"])
         except:
             pass
 

@@ -60,6 +60,7 @@ This is a Telegram bot application that allows users to download videos from pop
 - TikTok (tiktok.com, vm.tiktok.com, vt.tiktok.com)
 - Instagram (instagram.com, instagram.com/reel, instagram.com/p/)
 - Facebook (facebook.com, fb.com)
+- YouTube (youtube.com, youtu.be, m.youtube.com) - with MP3/1080p options
 
 ## Deployment Strategy
 
@@ -84,6 +85,9 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
+✓ August 19, 2025: Added YouTube support with MP3 and 1080p video download options
+✓ August 19, 2025: Implemented inline keyboard interface for YouTube format selection
+✓ August 19, 2025: Enhanced bot with callback handlers for user interaction
 ✓ June 20, 2025: Successfully resolved package conflicts between python-telegram-bot and telegram stub package
 ✓ June 20, 2025: Bot is now running and responding to commands in Kurdish language
 ✓ June 20, 2025: Video downloading functionality tested and working for TikTok, Instagram, Facebook

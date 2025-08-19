@@ -497,8 +497,8 @@ class VideoDownloader:
             logger.error(f"Direct download failed: {e}")
             # Clean up partial file
             try:
-                if 'dst' in locals() and os.path.exists(dst):
-                    os.remove(dst)
+                if 'dst' in locals() and 'dst' in locals() and os.path.exists(locals().get('dst', '')):
+                    os.remove(locals()['dst'])
             except Exception:
                 pass
             return None, "download_failed"
@@ -519,6 +519,95 @@ class VideoDownloader:
         except Exception as e:
             logger.error(f"Error finding downloaded file: {e}")
             return None
+    
+    def download_youtube(self, url: str, format_type: str) -> tuple[str | None, str]:
+        """
+        Download YouTube video or audio with specific quality options.
+        
+        Args:
+            url (str): YouTube URL
+            format_type (str): 'video' for 1080p video, 'audio' for MP3
+            
+        Returns:
+            tuple[str, str]: (file_path, result_message)
+        """
+        try:
+            logger.info(f"Starting YouTube {format_type} download for URL: {url}")
+            
+            # Configure options based on format type
+            if format_type == 'video':
+                # Best video quality up to 1080p
+                ydl_opts = {
+                    'format': 'best[height<=1080]/best',
+                    'outtmpl': os.path.join(TEMP_DIR, '%(title)s.%(ext)s'),
+                    'postprocessors': [{
+                        'key': 'FFmpegVideoConvertor',
+                        'preferedformat': 'mp4'
+                    }],
+                    'http_headers': {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                    }
+                }
+            else:  # audio format
+                # Best audio quality, convert to MP3
+                ydl_opts = {
+                    'format': 'bestaudio/best',
+                    'outtmpl': os.path.join(TEMP_DIR, '%(title)s.%(ext)s'),
+                    'postprocessors': [{
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': 'mp3',
+                        'preferredquality': '192',
+                    }],
+                    'http_headers': {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                    }
+                }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                # Get video info first
+                info = ydl.extract_info(url, download=False)
+                if not info:
+                    return None, "Failed to extract video information"
+                
+                # Sanitize title for filename
+                title = re.sub(r'[^\w\s-]', '', info.get('title', 'youtube_video')).strip().replace(' ', '_')[:50]
+                
+                # Update output template with sanitized title
+                if format_type == 'audio':
+                    filename = f"{title}.mp3"
+                else:
+                    filename = f"{title}.mp4"
+                
+                file_path = os.path.join(TEMP_DIR, filename)
+                ydl_opts['outtmpl'] = file_path.replace(f".{filename.split('.')[-1]}", ".%(ext)s")
+                
+                # Download the video/audio
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl_download:
+                    ydl_download.download([url])
+                
+                # Find the actual downloaded file
+                actual_file = None
+                for ext in ['mp4', 'mp3', 'webm', 'm4a']:
+                    test_path = file_path.replace(f".{filename.split('.')[-1]}", f".{ext}")
+                    if os.path.exists(test_path):
+                        actual_file = test_path
+                        break
+                
+                if not actual_file or not os.path.exists(actual_file):
+                    return None, f"Downloaded file not found for {format_type}"
+                
+                # Check file size
+                file_size = os.path.getsize(actual_file)
+                if file_size > MAX_FILE_SIZE:
+                    self.cleanup_file(actual_file)
+                    return None, f"File too large: {file_size / (1024*1024):.1f}MB (max: {MAX_FILE_SIZE / (1024*1024):.1f}MB)"
+                
+                logger.info(f"YouTube {format_type} downloaded successfully: {actual_file} ({file_size} bytes)")
+                return actual_file, "Success"
+                
+        except Exception as e:
+            logger.error(f"Error downloading YouTube {format_type}: {e}")
+            return None, f"Download failed: {str(e)}"
     
     def _cleanup_temp_files(self):
         """Clean up temporary files older than 1 hour."""
