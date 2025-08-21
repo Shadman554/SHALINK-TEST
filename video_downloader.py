@@ -14,6 +14,8 @@ from urllib.parse import urlparse
 from config import SUPPORTED_PLATFORMS, MAX_FILE_SIZE, TEMP_DIR
 import requests
 import time
+import subprocess
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -536,20 +538,43 @@ class VideoDownloader:
             
             # Configure options based on format type
             if format_type == 'video':
-                # Best video quality up to 1080p
+                # Enhanced format selection with age-restriction bypass
                 ydl_opts = {
-                    'format': 'best[height<=1080]/best',
+                    'format': '(bestvideo[height<=1080]+bestaudio/best[height<=1080])[filesize<45M]/best[height<=720][filesize<45M]/best[filesize<45M]/best',
                     'outtmpl': os.path.join(TEMP_DIR, '%(title)s.%(ext)s'),
+                    'merge_output_format': 'mp4',
                     'postprocessors': [{
                         'key': 'FFmpegVideoConvertor',
                         'preferedformat': 'mp4'
                     }],
+                    'prefer_ffmpeg': True,
+                    'writeinfojson': False,
+                    'writethumbnail': False,
+                    'extractor_retries': 5,
+                    'fragment_retries': 5,
+                    'retry_sleep_functions': {'http': lambda n: min(4 ** n, 100)},
+                    'age_limit': 99,  # Bypass age restrictions
+                    'geo_bypass': True,  # Bypass geo-restrictions
+                    'geo_bypass_country': 'US',  # Use US geo-bypass
                     'http_headers': {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                        'Accept-Language': 'en-us,en;q=0.5',
+                        'Accept-Encoding': 'gzip,deflate',
+                        'DNT': '1',
+                        'Connection': 'keep-alive',
+                        'Upgrade-Insecure-Requests': '1'
+                    },
+                    'extractor_args': {
+                        'youtube': {
+                            'skip': ['dash', 'hls'],
+                            'player_client': ['android', 'web'],
+                            'player_skip': ['configs']
+                        }
                     }
                 }
             else:  # audio format
-                # Best audio quality, convert to MP3
+                # Enhanced audio extraction with age-restriction bypass
                 ydl_opts = {
                     'format': 'bestaudio/best',
                     'outtmpl': os.path.join(TEMP_DIR, '%(title)s.%(ext)s'),
@@ -558,52 +583,135 @@ class VideoDownloader:
                         'preferredcodec': 'mp3',
                         'preferredquality': '192',
                     }],
+                    'writeinfojson': False,
+                    'writethumbnail': False,
+                    'prefer_ffmpeg': True,
+                    'extractor_retries': 5,
+                    'fragment_retries': 5,
+                    'retry_sleep_functions': {'http': lambda n: min(4 ** n, 100)},
+                    'age_limit': 99,  # Bypass age restrictions
+                    'geo_bypass': True,  # Bypass geo-restrictions
+                    'geo_bypass_country': 'US',  # Use US geo-bypass
+                    'ignoreerrors': False,
                     'http_headers': {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                        'Accept-Language': 'en-us,en;q=0.5',
+                        'Accept-Encoding': 'gzip,deflate',
+                        'DNT': '1',
+                        'Connection': 'keep-alive',
+                        'Upgrade-Insecure-Requests': '1'
+                    },
+                    'extractor_args': {
+                        'youtube': {
+                            'skip': ['dash', 'hls'],
+                            'player_client': ['android', 'web'],
+                            'player_skip': ['configs']
+                        }
                     }
                 }
             
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # Get video info first
-                info = ydl.extract_info(url, download=False)
-                if not info:
-                    return None, "Failed to extract video information"
-                
-                # Sanitize title for filename
-                title = re.sub(r'[^\w\s-]', '', info.get('title', 'youtube_video')).strip().replace(' ', '_')[:50]
-                
-                # Update output template with sanitized title
-                if format_type == 'audio':
-                    filename = f"{title}.mp3"
-                else:
-                    filename = f"{title}.mp4"
-                
-                file_path = os.path.join(TEMP_DIR, filename)
-                ydl_opts['outtmpl'] = file_path.replace(f".{filename.split('.')[-1]}", ".%(ext)s")
-                
-                # Download the video/audio
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl_download:
-                    ydl_download.download([url])
-                
-                # Find the actual downloaded file
-                actual_file = None
-                for ext in ['mp4', 'mp3', 'webm', 'm4a']:
-                    test_path = file_path.replace(f".{filename.split('.')[-1]}", f".{ext}")
-                    if os.path.exists(test_path):
-                        actual_file = test_path
-                        break
-                
-                if not actual_file or not os.path.exists(actual_file):
-                    return None, f"Downloaded file not found for {format_type}"
-                
-                # Check file size
-                file_size = os.path.getsize(actual_file)
-                if file_size > MAX_FILE_SIZE:
-                    self.cleanup_file(actual_file)
-                    return None, f"File too large: {file_size / (1024*1024):.1f}MB (max: {MAX_FILE_SIZE / (1024*1024):.1f}MB)"
-                
-                logger.info(f"YouTube {format_type} downloaded successfully: {actual_file} ({file_size} bytes)")
-                return actual_file, "Success"
+            # Try multiple approaches for age-restricted content
+            for attempt in range(1, 4):
+                try:
+                    logger.info(f"YouTube download attempt {attempt}/3")
+                    
+                    # Modify options for each attempt
+                    current_opts = ydl_opts.copy()
+                    
+                    if attempt == 2:
+                        # Second attempt: Use different player client
+                        current_opts['extractor_args'] = {
+                            'youtube': {
+                                'player_client': ['android_music', 'android'],
+                                'player_skip': ['webpage', 'configs']
+                            }
+                        }
+                    elif attempt == 3:
+                        # Third attempt: Use iOS client and different format
+                        current_opts['extractor_args'] = {
+                            'youtube': {
+                                'player_client': ['ios', 'android_creator'],
+                                'player_skip': ['webpage', 'configs', 'js']
+                            }
+                        }
+                        # More flexible format selection for difficult videos
+                        if format_type == 'video':
+                            current_opts['format'] = 'best[height<=720]/best[height<=480]/best'
+                        else:
+                            current_opts['format'] = 'bestaudio/worst'
+                    
+                    with yt_dlp.YoutubeDL(current_opts) as ydl:
+                        # Get video info first
+                        info = ydl.extract_info(url, download=False)
+                        if not info:
+                            if attempt == 3:
+                                return None, "Failed to extract video information after all attempts"
+                            continue
+                        
+                        # Sanitize title for filename
+                        title = re.sub(r'[^\w\s-]', '', info.get('title', 'youtube_video')).strip().replace(' ', '_')[:50]
+                        
+                        # Update output template with sanitized title
+                        if format_type == 'audio':
+                            filename = f"{title}.mp3"
+                        else:
+                            filename = f"{title}.mp4"
+                        
+                        file_path = os.path.join(TEMP_DIR, filename)
+                        current_opts['outtmpl'] = file_path.replace(f".{filename.split('.')[-1]}", ".%(ext)s")
+                        
+                        # Download the video/audio
+                        with yt_dlp.YoutubeDL(current_opts) as ydl_download:
+                            ydl_download.download([url])
+                        
+                        # Find the actual downloaded file with better search
+                        actual_file = None
+                        
+                        # First, look for files with the exact title
+                        for ext in ['mp4', 'mp3', 'webm', 'm4a', 'mkv']:
+                            test_path = file_path.replace(f".{filename.split('.')[-1]}", f".{ext}")
+                            if os.path.exists(test_path):
+                                actual_file = test_path
+                                break
+                        
+                        # If not found, search for any recent file in temp directory
+                        if not actual_file:
+                            try:
+                                temp_files = [f for f in os.listdir(TEMP_DIR) if f.lower().endswith(('.mp4', '.mp3', '.webm', '.m4a', '.mkv'))]
+                                if temp_files:
+                                    # Get the most recent file
+                                    temp_files.sort(key=lambda x: os.path.getctime(os.path.join(TEMP_DIR, x)), reverse=True)
+                                    actual_file = os.path.join(TEMP_DIR, temp_files[0])
+                                    logger.info(f"Found downloaded file by timestamp: {actual_file}")
+                            except Exception as e:
+                                logger.error(f"Error searching for downloaded file: {e}")
+                        
+                        if actual_file and os.path.exists(actual_file):
+                            # Check file size
+                            file_size = os.path.getsize(actual_file)
+                            if file_size > MAX_FILE_SIZE:
+                                self.cleanup_file(actual_file)
+                                return None, f"File too large: {file_size / (1024*1024):.1f}MB (max: {MAX_FILE_SIZE / (1024*1024):.1f}MB)"
+                            
+                            logger.info(f"YouTube {format_type} downloaded successfully: {actual_file} ({file_size} bytes)")
+                            return actual_file, "Success"
+                        
+                        # If this attempt failed, try the next one
+                        if attempt == 3:
+                            return None, f"Downloaded file not found for {format_type} after all attempts"
+                        else:
+                            logger.warning(f"Attempt {attempt} failed, trying next approach...")
+                            continue
+                            
+                except Exception as e:
+                    logger.error(f"YouTube download attempt {attempt} failed: {e}")
+                    if attempt == 3:
+                        return None, f"Download failed after all attempts: {str(e)}"
+                    continue
+            
+            # If we reach here, all attempts failed
+            return None, "All download attempts failed"
                 
         except Exception as e:
             logger.error(f"Error downloading YouTube {format_type}: {e}")
@@ -633,3 +741,63 @@ class VideoDownloader:
                 logger.info(f"Cleaned up file: {file_path}")
         except Exception as e:
             logger.error(f"Error cleaning up file {file_path}: {e}")
+    
+    def compress_video(self, input_path, target_size_mb=45):
+        """Compress video to fit within Telegram's file size limit."""
+        try:
+            if not os.path.exists(input_path):
+                logger.error(f"Input file not found: {input_path}")
+                return None
+                
+            # Get input file info
+            input_size = os.path.getsize(input_path) / (1024 * 1024)  # MB
+            logger.info(f"Compressing video: {input_size:.1f}MB -> {target_size_mb}MB")
+            
+            # Create output path
+            base_name = os.path.splitext(input_path)[0]
+            output_path = f"{base_name}_compressed.mp4"
+            
+            # Calculate compression ratio and bitrate
+            compression_ratio = target_size_mb / input_size
+            target_bitrate = max(100, int(500 * compression_ratio))  # Min 100k, scale based on compression
+            
+            # FFmpeg compression command
+            cmd = [
+                'ffmpeg', '-i', input_path,
+                '-c:v', 'libx264',
+                '-preset', 'fast',
+                '-crf', '28',
+                '-b:v', f'{target_bitrate}k',
+                '-c:a', 'aac',
+                '-b:a', '64k',
+                '-movflags', '+faststart',
+                '-y',  # Overwrite output file
+                output_path
+            ]
+            
+            logger.info(f"Running compression: {' '.join(cmd)}")
+            
+            # Run compression
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            
+            if result.returncode == 0 and os.path.exists(output_path):
+                output_size = os.path.getsize(output_path) / (1024 * 1024)
+                logger.info(f"Compression successful: {output_size:.1f}MB")
+                
+                # Clean up original file
+                try:
+                    os.remove(input_path)
+                except:
+                    pass
+                    
+                return output_path
+            else:
+                logger.error(f"Compression failed: {result.stderr}")
+                return None
+                
+        except subprocess.TimeoutExpired:
+            logger.error("Video compression timed out")
+            return None
+        except Exception as e:
+            logger.error(f"Error compressing video: {e}")
+            return None

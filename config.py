@@ -45,7 +45,8 @@ MESSAGES = {
     "processing_video": "ڤیدیۆ 1080p دادەبەزێت...",
     "processing_audio": "دەنگ MP3 دادەبەزێت...",
     "completed_video": "فەرموو ئەوەش ڤیدیۆکەت",
-    "completed_audio": "فەرموو ئەوەش فایلی دەنگەکەت"
+    "completed_audio": "فەرموو ئەوەش فایلی دەنگەکەت",
+    "compressing": "بەهۆی ئەوەی کە تلگرام ڕیگا نادات ڤیدیۆی سەروو ٥٠ مێگابایت لەڕێگەی بۆتی تلگرام بنێردرێت ڕەنگە نەتوانین بەو کوالیتیەی دەتەوی ڤیدیۆکەت پێشکەش بکەین"
 }
 
 # Instagram Proxy Configuration (optional)
@@ -62,5 +63,5 @@ PROXY_LIST = [
 PROXY_ROTATION_ENABLED = False
 
 # Download settings
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB limit for Telegram
+MAX_FILE_SIZE = 1000 * 1024 * 1024  # 1GB limit for downloads
 TEMP_DIR = "/tmp/telegram_bot_downloads"

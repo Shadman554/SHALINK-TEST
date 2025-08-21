@@ -92,7 +92,31 @@ async def handle_video_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
             except TelegramError as e:
                 if "file is too big" in str(e).lower():
-                    await update.message.reply_text("ڤیدیۆکە زۆر گەورەیە، ناتوانرێت بنێردرێت")
+                    # Try to compress the video
+                    compress_msg = await update.message.reply_text(MESSAGES["compressing"])
+                    compressed_path = downloader.compress_video(file_path)
+                    
+                    if compressed_path:
+                        try:
+                            with open(compressed_path, 'rb') as compressed_file:
+                                await update.message.reply_video(
+                                    video=compressed_file,
+                                    caption=MESSAGES["completed"],
+                                    supports_streaming=True
+                                )
+                            logger.info(f"Compressed video sent successfully to user {user_id}")
+                            # Clean up compressed file
+                            downloader.cleanup_file(compressed_path)
+                        except Exception as comp_e:
+                            await update.message.reply_text(MESSAGES["error_download_failed"])
+                            logger.error(f"Error sending compressed video: {comp_e}")
+                    else:
+                        await update.message.reply_text(MESSAGES["error_file_too_large"])
+                    
+                    try:
+                        await compress_msg.delete()
+                    except:
+                        pass
                 else:
                     await update.message.reply_text(MESSAGES["error_download_failed"])
                 logger.error(f"Telegram error sending video: {e}")
@@ -190,7 +214,35 @@ async def handle_youtube_callback(update: Update, context: ContextTypes.DEFAULT_
                 
             except TelegramError as e:
                 if "file is too big" in str(e).lower():
-                    await context.bot.send_message(query.message.chat_id, MESSAGES["error_file_too_large"])
+                    # Try to compress the video/audio
+                    await context.bot.send_message(query.message.chat_id, MESSAGES["compressing"])
+                    compressed_path = downloader.compress_video(file_path)
+                    
+                    if compressed_path:
+                        try:
+                            if format_type == 'audio':
+                                with open(compressed_path, 'rb') as compressed_file:
+                                    await context.bot.send_audio(
+                                        chat_id=query.message.chat_id,
+                                        audio=compressed_file,
+                                        caption=completed_msg
+                                    )
+                            else:
+                                with open(compressed_path, 'rb') as compressed_file:
+                                    await context.bot.send_video(
+                                        chat_id=query.message.chat_id,
+                                        video=compressed_file,
+                                        caption=completed_msg,
+                                        supports_streaming=True
+                                    )
+                            logger.info(f"Compressed YouTube {format_type} sent successfully to user {user_id}")
+                            # Clean up compressed file
+                            downloader.cleanup_file(compressed_path)
+                        except Exception as comp_e:
+                            await context.bot.send_message(query.message.chat_id, MESSAGES["error_download_failed"])
+                            logger.error(f"Error sending compressed YouTube {format_type}: {comp_e}")
+                    else:
+                        await context.bot.send_message(query.message.chat_id, MESSAGES["error_file_too_large"])
                 else:
                     await context.bot.send_message(query.message.chat_id, MESSAGES["error_download_failed"])
                 logger.error(f"Telegram error sending YouTube {format_type}: {e}")
